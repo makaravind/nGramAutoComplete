@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type MessageData struct {
@@ -29,7 +31,7 @@ type bigramNextValue struct {
 
 // v2- for any new bigrams for every user search update the mapped next world prrob
 
-/* func getTestCorpus() []string {
+func getTestCorpus() []string {
 	corpus := make([]string, 0)
 	corpus = append(corpus, "this is a the house that jack built")
 	corpus = append(corpus, "this is the malt")
@@ -39,7 +41,7 @@ type bigramNextValue struct {
 	corpus = append(corpus, "that ate the malt")
 	return corpus
 }
-*/
+
 func sanitizeWord(word string) string {
 	reg, err := regexp.Compile("[^a-zA-Z]+")
 	if err != nil {
@@ -123,7 +125,7 @@ func updateTextCorpusWithMessageData(corpus []string, messagesData []MessageData
 	return corpus
 }
 
-func getTestCorpus(forParticipant string, nGramn int, messagesFileBasePathRelative string) []string {
+func getTestCorpusFB(forParticipant string, nGramn int, messagesFileBasePathRelative string) []string {
 	var capacity = 1000
 	corpus := make([]string, 0, capacity)
 
@@ -141,7 +143,7 @@ func getTestCorpus(forParticipant string, nGramn int, messagesFileBasePathRelati
 	return corpus
 }
 
-func calculateWordProbability(corpus []string, nGramString string, word string) float32 {
+func calculateBiGramWordProbability(corpus []string, nGramString string, word string) float32 {
 	if word == "#" {
 		return 0 // end of the sentence; this should be chosen at the end
 	}
@@ -150,8 +152,8 @@ func calculateWordProbability(corpus []string, nGramString string, word string) 
 	var currentString = nGramString + " " + word
 
 	// search for respective strings in text corpus
-	var countOfTheCurrentString = 0 // this is car
-	var countOfBasePrevString = 0   // this is
+	var countOfTheCurrentString = 0 // this is
+	var countOfBasePrevString = 0   // this
 
 	for _, sentence := range corpus {
 		// fmt.Println("current sentence for prob : ", sentence, "/", currentString)
@@ -172,13 +174,20 @@ func calculateWordProbability(corpus []string, nGramString string, word string) 
 	return p
 }
 
-func createMapforSentence(corpus []string, corpusSentence int, window int,
+func createMapforSentence(corpus []string, corpusSentence int, nGramn int,
 	currentMap map[string][]bigramNextValue) {
 
 	var splitWords = strings.Split(corpus[corpusSentence], " ")
-	for i := 0; i < len(splitWords)-(window-1); i++ {
+	fmt.Println("split words ", splitWords)
+	for i := 0; i < len(splitWords)-(nGramn-2); i++ {
 		// convert to n-gram
-		var currentBiGramString = splitWords[i] + " " + splitWords[i+1]
+		// var currentBiGramString = splitWords[i] + " " + splitWords[i+1]
+		var currentBiGramString = ""
+		for j := 0; j < nGramn-1; j++ {
+			currentBiGramString = currentBiGramString + " " + splitWords[i+j]
+		}
+		currentBiGramString = strings.Trim(currentBiGramString, " ")
+		// fmt.Println("current string ", currentBiGramString)
 
 		// get the next word
 		var nextWords = currentMap[currentBiGramString]
@@ -186,14 +195,14 @@ func createMapforSentence(corpus []string, corpusSentence int, window int,
 			nextWords = make([]bigramNextValue, 0)
 		}
 		var nextWord = bigramNextValue{"", 0}
-		if i+2 >= len(splitWords) { // convert to n-gram
+		if i+(nGramn-1) >= len(splitWords) { // convert to n-gram
 			nextWord.word = "#" // terminating string
 		} else {
-			nextWord.word = splitWords[i+2] // convert to n-gram
+			nextWord.word = splitWords[i+(nGramn-1)] // convert to n-gram
 		}
 
 		// calculate probability of the word
-		nextWord.prob = calculateWordProbability(corpus, currentBiGramString, nextWord.word)
+		nextWord.prob = calculateBiGramWordProbability(corpus, currentBiGramString, nextWord.word)
 
 		//add if the word is not already present
 		var wordAlreadySeen = false
@@ -219,7 +228,7 @@ func createNGramNextWordMap(corpus []string, window int) map[string][]bigramNext
 	var m = make(map[string][]bigramNextValue)
 
 	for i := 0; i < len(corpus); i++ {
-		// fmt.Println("Tokenizing sentence : ", corpus[i])
+		fmt.Println("Tokenizing sentence : ", corpus[i])
 		createMapforSentence(corpus, i, window, m)
 	}
 	// fmt.Println("These are the values of map:", m)
@@ -238,12 +247,20 @@ func predictNextWord(nGramNextWordMap map[string][]bigramNextValue, nGramn int, 
 
 	fmt.Println("predictiong split words", splitWords)
 
-	if splitWordsLen <= nGramn {
+	if splitWordsLen <= (nGramn - 1) {
 		return "invalid, nothing predicted!"
 	}
 
-	var biGramString = splitWords[splitWordsLen-2] + " " + splitWords[splitWordsLen-1]
-	var possibleNextWords = nGramNextWordMap[biGramString]
+	// var biGramString = splitWords[splitWordsLen-2] + " " + splitWords[splitWordsLen-1]
+	var biGramString = ""
+	for j := nGramn; j > 0; j-- {
+		biGramString = biGramString + " " + splitWords[splitWordsLen-j]
+	}
+	biGramString = strings.Trim(biGramString, " ")
+
+	var _possibleNextWords = nGramNextWordMap[biGramString]
+	var possibleNextWords = make([]bigramNextValue, len(_possibleNextWords))
+	suffleBiGramValueWords(_possibleNextWords, possibleNextWords)
 
 	// find word with max prob
 	var maxProbWord = bigramNextValue{"", -1}
@@ -263,7 +280,7 @@ func predictNextWordTillEnd(m map[string][]bigramNextValue, nGramn int, seed str
 	for {
 		nextWord := predictNextWord(m, nGramn, fullSentence)
 		fmt.Println("nextWord : ", nextWord)
-		if nextWord == "#" || nextWord == ""{
+		if nextWord == "#" || nextWord == "" {
 			break
 		}
 		fullSentence += " " + nextWord
@@ -271,10 +288,21 @@ func predictNextWordTillEnd(m map[string][]bigramNextValue, nGramn int, seed str
 	return fullSentence
 }
 
+func suffleBiGramValueWords(src, dest []bigramNextValue) {
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	for i, v := range r.Perm(len(src)) {
+		dest[v] = src[i]
+	}
+}
+
 func main() {
+	/* corpus := getTestCorpus()
+	var m map[string][]bigramNextValue = createNGramNextWordMap(corpus, 2)
+	fmt.Println("bigram map: ", m)
+	*/
 	nGramn := 2
 	messageBasePath := "facebook-mak11195/messages_small/"
-	corpus := getTestCorpus("Aravind Metku", nGramn, messageBasePath)
+	corpus := getTestCorpusFB("Aravind Metku", nGramn, messageBasePath)
 
 	if len(corpus) > 0 {
 		fmt.Println("number of sentenses in the corpus: ", len(corpus))
@@ -283,7 +311,7 @@ func main() {
 
 		fmt.Println("-----------------Prediction----------------")
 
-		fullSentence := predictNextWordTillEnd(m, nGramn, "how are")
+		fullSentence := predictNextWordTillEnd(m, nGramn, "hi")
 		fmt.Println(fullSentence)
 	}
 
